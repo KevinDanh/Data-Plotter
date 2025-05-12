@@ -11,7 +11,7 @@ Template for reading in CSV files and plotting them.
 
 # How to run
 ```
-python gui.py
+python main.py
 ```
 
 # Dependencies

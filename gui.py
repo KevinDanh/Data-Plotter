@@ -1,48 +1,62 @@
-import sys
-import pandas as pd
-import matplotlib.pyplot as plt
-from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QVBoxLayout, QWidget, QTableWidgetItem
-from widgets import makeButton, makeTable, makeComboBox, makeLabel, makeSearchBox
+"""
+File: gui.py
+Description: [Brief description of what this script does]
+"""
 
-class Window(QMainWindow):
+# Third Party Libraries
+import pandas as pd
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QMainWindow
+
+# Local Libraries
+from MplTools import *
+from QtWidgets import *
+
+class MainWindow(QMainWindow):
     def __init__(self):
-        super(Window, self).__init__()
+        super(MainWindow, self).__init__()
         self.setGeometry(1500,500,720,360)
         self.setWindowTitle("Main Window")
         self.initUI()
         self.data = None
     
     def initUI(self):
-        centralWidget = QWidget() # Central Widget - Main Container for all widgets within the gui
-        self.setCentralWidget(centralWidget) # Sets centralWidget as the main widget for our window
+        # Create Central Widget - Main Container for all widgets within the Main Window
+        centralWidget = makeCustomWidget(self)
+        self.mainLayout = makeLayout("vertical")
 
-        # Layout
-        layout = QVBoxLayout() # Organizes Widgets Vertically
-        centralWidget.setLayout(layout)
+        # Main Window Settings
+        self.setCentralWidget(centralWidget)
+        self.setMenuBar(makeMenuBar(self)) # Create Menu toolbar
+
+        centralWidget.setLayout(self.mainLayout)
 
         # Create Widgets
-        self.table = makeTable(self)
-        self.table.hide()
+        self.figure = None
+        self.canvas = None
         self.searchBox = makeSearchBox(self, self.updateSelectionBox)
-        self.searchBox.hide()
-        self.selectionBox = makeComboBox(self)
-        self.selectionBox.hide()
         self.selectedFileLabel = makeLabel(self)
-        self.selectedFileLabel.hide()
-        self.importButton = makeButton(self, "Import CSV", self.loadCsv)
+        self.selectionBox = makeComboBox(self)
         self.plotButton = makeButton(self, "Plot Data", self.plot)
-        self.exitButton = makeButton(self, "Exit", self.exit)
+        self.table = makeTable(self)
+        
+        # Set certain widgets to hidden
+        self.table.hide()
+        self.searchBox.hide()
+        self.selectionBox.hide()
+        self.selectedFileLabel.hide()
         self.plotButton.hide()
 
-        # Add Widgets to the layout
-        # Order here changes how the widgets are stacked
-        layout.addWidget(self.importButton)
-        layout.addWidget(self.plotButton)
-        layout.addWidget(self.searchBox)
-        layout.addWidget(self.selectedFileLabel)
-        layout.addWidget(self.selectionBox)
-        layout.addWidget(self.table)
-        layout.addWidget(self.exitButton)
+        # Search Bar Layout
+        self.searchLayout = makeLayout("horizontal")
+        self.searchLayout.addWidget(self.searchBox)
+        self.searchLayout.addWidget(self.plotButton)
+ 
+        # Main Layout Order
+        self.mainLayout.addLayout(self.searchLayout)
+        self.mainLayout.addWidget(self.selectedFileLabel)
+        self.mainLayout.addWidget(self.selectionBox)
+        self.mainLayout.addWidget(self.table)
 
     # Callback methods
     def loadCsv(self):
@@ -51,7 +65,6 @@ class Window(QMainWindow):
         if file_name:
             self.selectedFileLabel.setText(f'Selected file: {file_name}')
             self.data = pd.read_csv(file_name)
-            self.selectionBox.addItems(["All"])
             self.selectionItems = self.data.keys()
             self.selectionBox.addItems(self.selectionItems)
             self.selectionBox.currentTextChanged.connect(self.updateTable)
@@ -64,17 +77,28 @@ class Window(QMainWindow):
 
     def plot(self):
         selected_option = self.selectionBox.currentText()
-        if selected_option == "All":
-            for key in self.data.keys():
-                plt.figure()
-                try:
-                    plt.plot(self.data[key])
-                except TypeError:
-                    print(f"Cannot plot: {key}")
-        else:
-            df = self.data[selected_option]
-            plt.plot(df)
-        plt.show()
+
+        if self.canvas is None:  # Create canvas only once
+            self.figure = makeFigure(6, 4)  # Create a new Figure object
+            self.canvas = makeFigureCanvas(self, self.figure)
+            self.toolbar = makeNavigationToolBar(self, self.canvas)
+            self.plotWidget = PlotWidget(self, self.canvas, self.toolbar)
+            self.ax = self.figure.add_subplot(111)  # Create subplot
+                
+            self.dockablePlot = makeDockablePlot(self, "Plot View")
+            self.dockablePlot.setWidget(self.plotWidget)
+            self.addDockWidget(Qt.RightDockWidgetArea, self.dockablePlot)  # Default position
+
+        self.ax.clear()  # Clear previous plots before drawing a new one
+
+        df = self.data[selected_option]
+        try:
+            self.ax.plot(df)
+        except TypeError:
+            print(f"Cannot plot {selected_option}")
+
+        self.ax.set_title("Data Plot")
+        self.canvas.draw()  # Refresh canvas with new plot
 
     def updateSelectionBox(self):
         searchText = self.searchBox.text().lower() # Get the text from the search box
@@ -85,38 +109,23 @@ class Window(QMainWindow):
         self.selectionBox.addItems(filtered_items)
 
     def updateTable(self):
-        selected_column = self.selectionBox.currentText()
-        if selected_column:
-            if selected_column == "All":
-                self.table.setRowCount(self.data.shape[0])
-                self.table.setColumnCount(len(self.data.keys()))
-                self.table.setHorizontalHeaderLabels(self.data.keys())
+        selectedColumn = self.selectionBox.currentText()
 
-                for row in range(self.data.shape[0]):
-                    for col in range(self.data.shape[1]):
-                        self.table.setItem(row, col, QTableWidgetItem(str(self.data.iloc[row, col])))
-            else: 
-                df = self.data[[selected_column]]  # Select column
-                self.table.setRowCount(df.shape[0])
-                self.table.setColumnCount(len(df.keys()))
-                self.table.setHorizontalHeaderLabels([selected_column])
+        if not selectedColumn:
+            return
+        
+        self.table.clearContents()  # Clear previous data
+        df = self.data[[selectedColumn]]
 
-                for row in range(df.shape[0]):
-                    self.table.setItem(row, 0, QTableWidgetItem(str(df.iloc[row, 0])))
+        self.table.setRowCount(df.shape[0])
+        self.table.setColumnCount(len(df.keys()))
+        self.table.setHorizontalHeaderLabels([selectedColumn])
+
+        # Faster way to populate the table
+        for row, values in enumerate(df.values.tolist()):
+            for col, value in enumerate(values):
+                self.table.setItem(row, col, makeTableWidgetItem(str(value)))
 
     def update(self):
         self.updateTable()
         self.selectedFileLabel.adjustSize()
-    
-    def exit(self):
-        plt.close('all')
-        sys.exit()
-    
-def main():
-    app = QApplication(sys.argv)
-    win = Window()
-    win.show()
-    sys.exit(app.exec_())
-
-if __name__ == "__main__":
-    main()
